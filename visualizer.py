@@ -8,7 +8,7 @@ import ipinfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-def get_ip_details(ip):
+def get_ip_details(handler, ip):
     try:
         details = handler.getDetails(ip)
         return details.all
@@ -116,54 +116,39 @@ def get_browserhistory(database_paths):
 
 
 def prep_browserhistory(browserhistory):
-    data_all = dict()
-    data_ips = set()
+    ip_addresses = set()
 
     for browser, entries in browserhistory.items():
-        if browser not in data_all:
-            data_all[browser] = {'entries':{}}
-
-        for index, entry in enumerate(entries):
+        for entry in entries:
             try:
                 domain = urlparse(entry[0]).netloc.replace('www.', '').split(':')[0]
                 ip = socket.gethostbyname(domain)
-                data_ips.add(ip)
-                date = datetime.strptime(entry[2], '%Y-%m-%d %H:%M:%S').date()
-                if index == 0:
-                    data_all[browser]['start'] = date
-                    data_all[browser]['end'] = date
-
-                if date < data_all[browser]['start']:
-                    data_all[browser]['start'] = date
-                elif date > data_all[browser]['end']:
-                    data_all[browser]['end'] = date
-
-                if domain not in data_all[browser]['entries']:
-                    data_all[browser]['entries'][domain] = [ip, 1]
-                else:
-                    data_all[browser]['entries'][domain][1] += 1
+                ip_addresses.add(ip)
             except socket.gaierror as e:
                 print(f'Error: Could not get host for {domain} ({e})')
             except Exception as e:
                 print(e)
 
-    return data_all, data_ips
+    return ip_addresses
 
 
-def get_ip_details(access_token=None, data_ips):
-    if access_token is None:
-        print('--------------- ERROR ---------------')
-        print('No access token for ipinfo.io provided.')
-        print('-------------------------------------')
-        exit()
-
+def prep_geo_data(access_token, ip_addresses):
     handler = ipinfo.getHandler(access_token)
-
-    complete_details = list()
+    
+    futures = list()
+    latitude = list()
+    longitude = list()
     with ThreadPoolExecutor(max_workers=10) as e:
-        for ip in data_ips:
-            complete_details.append(e.submit(get_ip_details, ip))
+        for ip in ip_addresses:
+            futures.append(e.submit(get_ip_details, handler, ip))
+        for future in as_completed(futures):
+            try:
+                latitude.append(float(future.result()['latitude']))
+                longitude.append(float(future.result()['longitude']))
+            except TypeError:
+                print(f'Error: No ipinfo.io data for {future.result()}')
+            except Exception as e:
+                print(e)
 
-    return complete_details
-
-# print(complete_details)
+    ip_geo_details = [latitude, longitude]
+    return ip_geo_details
