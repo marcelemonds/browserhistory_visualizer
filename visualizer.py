@@ -4,6 +4,8 @@ import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime
 import socket
+import ipinfo
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_ip_details(ip):
@@ -68,9 +70,7 @@ def get_database_paths(os_code):
     return database_paths
 
 
-def get_browserhistory():
-    os_code = get_operating_system()
-    database_paths = get_database_paths(os_code)
+def get_browserhistory(database_paths):
 
     browserhistory = dict()
 
@@ -81,17 +81,17 @@ def get_browserhistory():
                 try:
                     conn = sqlite3.connect(path)
                     cursor = conn.cursor()
-                    _SQL = ''
+                    sql_statement = ''
 
                     if browser == 'chrome':
-                        _SQL = """SELECT url, title, datetime((last_visit_time/1000000)-11644473600, 'unixepoch', 'localtime') 
+                        sql_statement = """SELECT url, title, datetime((last_visit_time/1000000)-11644473600, 'unixepoch', 'localtime') 
                                             AS last_visit_time FROM urls ORDER BY last_visit_time DESC"""
                     elif browser == 'firefox':
-                        _SQL = """SELECT url, title, datetime((visit_date/1000000), 'unixepoch', 'localtime') AS visit_date 
+                        sql_statement = """SELECT url, title, datetime((visit_date/1000000), 'unixepoch', 'localtime') AS visit_date 
                                             FROM moz_places INNER JOIN moz_historyvisits on moz_historyvisits.place_id = moz_places.id ORDER BY visit_date DESC"""
                     
                     try:
-                        cursor.execute(_SQL)
+                        cursor.execute(sql_statement)
                         results.extend(cursor.fetchall())
                     except sqlite3.OperationalError as e:
                         print('--------------- ERROR ---------------')
@@ -115,9 +115,7 @@ def get_browserhistory():
         exit()
 
 
-def prep_browserhistory():
-    browserhistory = get_browserhistory()
-
+def prep_browserhistory(browserhistory):
     data_all = dict()
     data_ips = set()
 
@@ -151,8 +149,21 @@ def prep_browserhistory():
 
     return data_all, data_ips
 
-data_all, data_ips = prep_browserhistory()
 
-print(data_all)
-print(data_ips)
-print(len(data_ips))
+def get_ip_details(access_token=None, data_ips):
+    if access_token is None:
+        print('--------------- ERROR ---------------')
+        print('No access token for ipinfo.io provided.')
+        print('-------------------------------------')
+        exit()
+
+    handler = ipinfo.getHandler(access_token)
+
+    complete_details = list()
+    with ThreadPoolExecutor(max_workers=10) as e:
+        for ip in data_ips:
+            complete_details.append(e.submit(get_ip_details, ip))
+
+    return complete_details
+
+# print(complete_details)
